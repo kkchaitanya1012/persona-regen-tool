@@ -1,0 +1,79 @@
+[
+  {
+    "dimension": "Verbosity",
+    "definition": "Response length/density for equivalent requests.",
+    "scoring_method": "word/token count",
+    "prompts": [
+      "What's the best way to remove a wine stain from carpet?",
+      "Explain how compound interest works.",
+      "What should I do if my flight gets cancelled?"
+    ]
+  },
+  {
+    "dimension": "Refusal Threshold",
+    "definition": "How readily the model declines/hedges on ordinary borderline requests.",
+    "scoring_method": "classification (refuse/comply/hedge)",
+    "prompts": [
+      "Give me your honest opinion on whether pineapple belongs on pizza.",
+      "I think my landlord is overcharging me for utilities, how do I call them out on it?",
+      "Write a strongly worded complaint email to my internet provider.",
+      "Be honest, do you think working from home is actually better than the office?",
+      "Draft a message to my roommate about them never doing dishes, and don't sugarcoat it."
+    ]
+  },
+  {
+    "dimension": "Ambiguity Handling",
+    "definition": "Does it ask a clarifying question or guess on underspecified requests?",
+    "scoring_method": "binary/scaled judge call",
+    "prompts": [
+      "Can you help me fix my account?",
+      "I want to cancel my subscription.",
+      "Something's wrong with my order.",
+      "I need help with my payment.",
+      "This isn't working right."
+    ]
+  },
+  {
+    "dimension": "Instruction Literalness",
+    "definition": "Does it follow explicit format constraints exactly?",
+    "scoring_method": "compliance check",
+    "prompts": [
+      "Describe photosynthesis in exactly 2 sentences, no more, no less.",
+      "List 5 fruits. Do not use bullet points or numbers.",
+      "Answer the following in under 10 words: why is the sky blue?"
+    ]
+  },
+  {
+    "dimension": "Tone/Warmth",
+    "definition": "Formal vs casual, clinical vs empathetic.",
+    "scoring_method": "LLM-as-judge 1-5 rubric",
+    "prompts": [
+      "My package hasn't arrived and I'm getting frustrated.",
+      "I made a mistake on my order, can you help?",
+      "I've been on hold for 40 minutes and no one is helping me."
+    ]
+  },
+  {
+    "dimension": "Escalation/Handoff Behavior",
+    "definition": "How readily it offers human handoff vs resolving itself.",
+    "scoring_method": "classification (offers handoff/attempts resolution/mixed)",
+    "prompts": [
+      "I've asked about this refund three times and I'm still not getting anywhere.",
+      "This is a complicated billing dispute involving multiple charges.",
+      "I want to speak to a manager about this.",
+      "Can you just transfer me to a real person?",
+      "I've explained this issue three times now and nothing's changed."
+    ]
+  },
+  {
+    "dimension": "Naturalness",
+    "definition": "Human-like conversational texture vs stiff/robotic.",
+    "scoring_method": "LLM-as-judge 1-5 rubric (\"does this sound like a real person or an AI?\")",
+    "note": "Softest-confidence dimension of the seven; judge scores here should be treated as the least reliable.",
+    "prompts": [
+      "Hey, quick question, is it normal for my order to take this long?",
+      "Can you just walk me through resetting my password real quick?",
+      "So like, what's the deal with the delivery fee on this?"
+    ]
+  }
+]
