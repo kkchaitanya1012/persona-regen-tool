@@ -23,7 +23,7 @@ When you move a production agent from one LLM to another, the same system prompt
    - `MODEL_B`: the model you're migrating to (default `anthropic/claude-sonnet-4.6`). It also does the persona rewrite.
 4. Confirm both model slugs exist on [openrouter.ai/models](https://openrouter.ai/models). Slugs change over time, and a wrong one fails on the first call.
 
-Note: output filenames and labels (`gpt4o_to_claude_diff.json`, `*_claude` transcripts, "GPT-4o"/"Claude" in the validation summary) are written for the default GPT-4o -> Claude pair. Other pairs run, but the names stay the same.
+Any pair of OpenRouter models works. Output filenames and labels come from the slugs, so `MODEL_A=openai/gpt-4o` and `MODEL_B=anthropic/claude-sonnet-4.6` produce `gpt-4o_to_claude-sonnet-4.6_diff.json`, `support_agent_v1_calibrated_for_claude-sonnet-4.6.md` and `naive_gpt-4o_transcript.md`, and switching either model never overwrites another pair's outputs.
 
 ## Quick Start
 
@@ -42,7 +42,15 @@ Expect roughly 8 minutes on a first run (it makes about 170 real, billed API cal
 
 Outputs land in `outputs/` (gitignored): fingerprints, the diff, the regenerated persona and changelog, and the four validation transcripts.
 
-Each stage can also be run alone: `python -m src.fingerprint.fingerprint`, `python -m src.diff.diff_engine`, `python -m src.regenerate.regenerator`, `python -m src.demo.validate`. The fingerprint and diff stages take a `--persona` flag to probe with `data/personas/support_agent_v1.md` applied as the system prompt (persona-conditioned fingerprints).
+To calibrate a different persona, pass its file (default `data/personas/support_agent_v1.md`):
+
+```bash
+python run_pipeline.py --persona-file path/to/my_persona.md
+```
+
+The calibrated prompt is named after the persona file (`my_persona_calibrated_for_<model>.md`). Only the rewrite step is fully persona-agnostic: the 7-turn validation conversation and its judge test the support agent's "be honest if asked whether you're an AI" rule, and the rewrite guidance for the escalation dimension assumes that rule too, so for other personas treat the validation results with that in mind.
+
+Each stage can also be run alone: `python -m src.fingerprint.fingerprint`, `python -m src.diff.diff_engine`, `python -m src.regenerate.regenerator`, `python -m src.demo.validate`. They all read `MODEL_A`/`MODEL_B` from `.env` and take `--persona-file`. The fingerprint and diff stages also take a `--persona` flag to probe with the persona applied as the system prompt (persona-conditioned fingerprints, saved as `*_persona_<persona name>.json`).
 
 ## What we found
 

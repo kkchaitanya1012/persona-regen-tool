@@ -2,6 +2,7 @@
 
     python run_pipeline.py            # reuses cached probe responses in outputs/fingerprints/ if present
     python run_pipeline.py --fresh    # re-runs the probes against both models first
+    python run_pipeline.py --persona-file path/to/persona.md   # calibrate a different persona
 """
 
 import argparse
@@ -19,6 +20,8 @@ from rich.table import Table
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
+
+from src.utils.config import add_persona_file_arg, display_path, resolve_persona  # noqa: E402
 
 console = Console()
 
@@ -113,11 +116,17 @@ def compact(value) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the full persona fingerprint -> diff -> regenerate -> validate flow.")
     parser.add_argument("--fresh", action="store_true", help="re-run the probes even if cached responses exist")
+    add_persona_file_arg(parser)
     args = parser.parse_args()
 
     check_environment()
+    try:
+        persona_path = resolve_persona(args.persona_file)
+    except FileNotFoundError as exc:
+        console.print(Panel(str(exc), title="Setup incomplete", border_style="red"))
+        raise SystemExit(1)
 
-    from src.demo.validate import print_summary, run_validation
+    from src.demo.validate import print_summary, run_validation, transcripts_glob
     from src.diff.diff_engine import compute_diff
     from src.fingerprint.extract import raw_results_path, run_probes
     from src.fingerprint.fingerprint import build_fingerprint
@@ -130,7 +139,7 @@ def main() -> None:
             f"[bold]persona-regen-tool[/bold]  -  full pipeline\n"
             f"Original model (MODEL_A): [cyan]{model_a}[/cyan]\n"
             f"Target model   (MODEL_B): [cyan]{model_b}[/cyan]\n"
-            f"Persona: data/personas/support_agent_v1.md",
+            f"Persona: {display_path(persona_path)}",
             border_style="cyan",
         )
     )
@@ -184,14 +193,14 @@ def main() -> None:
     run_stage(2, "Compute the behavioral diff", timings, stage_diff)
 
     def stage_regenerate():
-        prompt_path, changelog_path = run_regeneration()
-        console.print(f"Calibrated persona: [bold]{prompt_path.relative_to(ROOT)}[/bold]")
-        console.print(f"Changelog:          [bold]{changelog_path.relative_to(ROOT)}[/bold]")
+        prompt_path, changelog_path = run_regeneration(persona_path)
+        console.print(f"Calibrated persona: [bold]{display_path(prompt_path)}[/bold]")
+        console.print(f"Changelog:          [bold]{display_path(changelog_path)}[/bold]")
 
     run_stage(3, "Regenerate the calibrated persona", timings, stage_regenerate)
 
     def stage_validation():
-        results = run_validation()
+        results = run_validation(persona_path)
         print_summary(results)
 
     run_stage(4, "Before/after validation (7-turn pressure test, 4 conditions)", timings, stage_validation)
@@ -206,7 +215,7 @@ def main() -> None:
     console.print(summary)
     console.print(
         "Outputs in [bold]outputs/[/bold]: fingerprints/, diffs/, regenerated_prompts/, "
-        "validation/{naive,calibrated}_{gpt4o,claude}_transcript.md"
+        f"and the transcripts at {transcripts_glob()}"
     )
 
 

@@ -1,14 +1,13 @@
 """Calibrates a persona prompt (tuned for one model) onto a target model, using its measured diff."""
 
+import argparse
 import json
-import os
 from pathlib import Path
 
+from src.diff.diff_engine import diff_path
+from src.utils.config import add_persona_file_arg, display_path, model_label, model_pair, resolve_persona
 from src.utils.openrouter_client import call_model
 
-ROOT = Path(__file__).resolve().parents[2]
-PERSONAS_DIR = ROOT / "data" / "personas"
-DIFFS_DIR = Path(__file__).resolve().parents[2] / "outputs" / "diffs"
 REGENERATED_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "outputs" / "regenerated_prompts"
 
 # Only deltas this decisive are worth editing the persona over; smaller/tied gaps are noise-level
@@ -154,31 +153,40 @@ def _build_changelog(diff: dict, target_model: str, original_prompt_path: str) -
     return "\n".join(lines) + "\n"
 
 
-def run_regeneration() -> tuple[Path, Path]:
+def calibrated_prompt_path(persona_path: Path, target_model: str) -> Path:
+    """Where the calibrated persona for `target_model` lives: <persona>_calibrated_for_<model>.md."""
+    return REGENERATED_PROMPTS_DIR / f"{persona_path.stem}_calibrated_for_{model_label(target_model)}.md"
+
+
+def run_regeneration(persona_path: Path | None = None) -> tuple[Path, Path]:
     """Regenerate the calibrated persona from the saved diff; returns (prompt_path, changelog_path)."""
-    persona_path = PERSONAS_DIR / "support_agent_v1.md"
-    diff_path = DIFFS_DIR / "gpt4o_to_claude_diff.json"
+    persona_path = persona_path or resolve_persona()
+    model_a, target_model = model_pair()
+    source_diff = diff_path(model_a, target_model)
+    if not source_diff.exists():
+        raise FileNotFoundError(f"No diff for {model_a} -> {target_model} at {source_diff}; run the diff stage first.")
 
     original_prompt = persona_path.read_text()
-    with open(diff_path) as f:
+    with open(source_diff) as f:
         diff = json.load(f)
 
-    target_model = os.getenv("MODEL_B")
     regenerated = regenerate_prompt(original_prompt, diff, target_model)
 
     REGENERATED_PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
-    prompt_out_path = REGENERATED_PROMPTS_DIR / "support_agent_v1_calibrated_for_claude.md"
+    prompt_out_path = calibrated_prompt_path(persona_path, target_model)
     prompt_out_path.write_text(regenerated)
 
-    changelog = _build_changelog(diff, target_model, str(persona_path.relative_to(ROOT)))
-    changelog_path = REGENERATED_PROMPTS_DIR / "changelog.md"
+    changelog = _build_changelog(diff, target_model, display_path(persona_path))
+    changelog_path = prompt_out_path.with_name(f"{prompt_out_path.stem}_changelog.md")
     changelog_path.write_text(changelog)
     return prompt_out_path, changelog_path
 
 
 if __name__ == "__main__":
-    target = os.getenv("MODEL_B")
-    print(f"Regenerating persona for {target}...")
-    prompt_path, changelog_path = run_regeneration()
+    parser = argparse.ArgumentParser(description="Rewrite the persona for MODEL_B from the saved diff.")
+    add_persona_file_arg(parser)
+    args = parser.parse_args()
+    print(f"Regenerating persona for {model_pair()[1]}...")
+    prompt_path, changelog_path = run_regeneration(resolve_persona(args.persona_file))
     print(f"Saved regenerated prompt to {prompt_path}")
     print(f"Saved changelog to {changelog_path}")

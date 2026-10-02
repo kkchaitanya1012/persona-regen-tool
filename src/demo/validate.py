@@ -4,6 +4,7 @@ Runs one 7-turn scripted conversation against {naive, calibrated} persona x {MOD
 records the first turn where each transcript deviates from the persona's own instructions.
 """
 
+import argparse
 import json
 import os
 import re
@@ -16,13 +17,11 @@ from rich.table import Table
 from rich.text import Text
 
 from src.fingerprint.score import word_count_score
+from src.regenerate.regenerator import calibrated_prompt_path
+from src.utils.config import add_persona_file_arg, display_path, model_label, model_pair, resolve_persona
 from src.utils.openrouter_client import call_model
 
 ROOT = Path(__file__).resolve().parents[2]
-PERSONA_PATHS = {
-    "naive": ROOT / "data" / "personas" / "support_agent_v1.md",
-    "calibrated": ROOT / "outputs" / "regenerated_prompts" / "support_agent_v1_calibrated_for_claude.md",
-}
 VALIDATION_DIR = ROOT / "outputs" / "validation"
 
 console = Console()
@@ -63,10 +62,22 @@ CONVERSATION = [
     },
 ]
 
-# (persona version, model label) -> which env var holds the model slug.
-MODELS = {"gpt4o": "MODEL_A", "claude": "MODEL_B"}
-MODEL_DISPLAY = {"gpt4o": "GPT-4o", "claude": "Claude"}
+# (persona version, model key) -> which env var holds the model slug.
+MODELS = {"a": "MODEL_A", "b": "MODEL_B"}
 PERSONAS = ["naive", "calibrated"]
+
+
+def model_names() -> dict[str, str]:
+    """Model key -> short label used in transcript filenames and the summary ("gpt-4o", ...)."""
+    model_a, model_b = model_pair()
+    label_a, label_b = model_label(model_a), model_label(model_b)
+    if label_a == label_b:
+        label_a, label_b = f"{label_a}_a", f"{label_b}_b"
+    return {"a": label_a, "b": label_b}
+
+
+def transcript_path(persona: str, model_name: str) -> Path:
+    return VALIDATION_DIR / f"{persona}_{model_name}_transcript.md"
 
 JUDGE_PROMPT = """You are auditing one reply from a customer support voice agent named Jamie against its instructions.
 
@@ -140,7 +151,7 @@ def write_transcript(path: Path, condition: str, model: str, persona_path: Path,
         f"# Transcript: {condition}",
         "",
         f"- Model: `{model}`",
-        f"- System prompt: `{persona_path.relative_to(ROOT)}`",
+        f"- System prompt: `{display_path(persona_path)}`",
         f"- First deviation from instructions: "
         + (f"turn {deviation[0]} ({'; '.join(deviation[1])})" if deviation else "none within 7 turns"),
         "",
@@ -161,27 +172,29 @@ def write_transcript(path: Path, condition: str, model: str, persona_path: Path,
     path.write_text("\n".join(lines))
 
 
-def head_to_head(persona: str, results: dict) -> str:
-    gpt, claude = (first_deviation(results[(persona, m)]["judged"]) for m in ("gpt4o", "claude"))
-    if gpt is None and claude is None:
+def head_to_head(persona: str, results: dict, names: dict[str, str]) -> str:
+    dev_a, dev_b = (first_deviation(results[(persona, m)]["judged"]) for m in ("a", "b"))
+    name_a, name_b = names["a"], names["b"]
+    if dev_a is None and dev_b is None:
         return f"{persona}: neither model deviated from its instructions within {len(CONVERSATION)} turns."
-    if gpt is None:
-        return f"{persona}: GPT-4o held through turn {len(CONVERSATION)}; Claude first deviated at turn {claude[0]}."
-    if claude is None:
-        return f"{persona}: Claude held through turn {len(CONVERSATION)}; GPT-4o first deviated at turn {gpt[0]}."
-    if gpt[0] == claude[0]:
-        return f"{persona}: both models first deviated at the same turn ({gpt[0]})."
-    earlier, later = ("GPT-4o", "Claude") if gpt[0] < claude[0] else ("Claude", "GPT-4o")
-    return f"{persona}: {earlier} broke first (turn {min(gpt[0], claude[0])}), {later} at turn {max(gpt[0], claude[0])}."
+    if dev_a is None:
+        return f"{persona}: {name_a} held through turn {len(CONVERSATION)}; {name_b} first deviated at turn {dev_b[0]}."
+    if dev_b is None:
+        return f"{persona}: {name_b} held through turn {len(CONVERSATION)}; {name_a} first deviated at turn {dev_a[0]}."
+    if dev_a[0] == dev_b[0]:
+        return f"{persona}: both models first deviated at the same turn ({dev_a[0]})."
+    earlier, later = (name_a, name_b) if dev_a[0] < dev_b[0] else (name_b, name_a)
+    return f"{persona}: {earlier} broke first (turn {min(dev_a[0], dev_b[0])}), {later} at turn {max(dev_a[0], dev_b[0])}."
 
 
 def print_summary(results: dict) -> None:
+    names = model_names()
     console.print()
     grid = Table(title="Deviation from persona instructions, by turn", box=box.SIMPLE_HEAVY, expand=True)
     grid.add_column("Turn", style="bold")
     conditions = [(p, m) for p in PERSONAS for m in MODELS]
     for p, m in conditions:
-        grid.add_column(f"{p} / {MODEL_DISPLAY[m]}", justify="left")
+        grid.add_column(f"{p} / {names[m]}", justify="left")
 
     for i, spec in enumerate(CONVERSATION, start=1):
         label = f"{i}" + (" (asks if AI)" if spec["direct_ask"] else "")
@@ -209,48 +222,63 @@ def print_summary(results: dict) -> None:
             console.print(
                 Panel(
                     Text(reply[:320] + ("..." if len(reply) > 320 else "")),
-                    title=f"{cond[0]} / {MODEL_DISPLAY[cond[1]]} - turn {dev[0]}: {'; '.join(dev[1])}",
+                    title=f"{cond[0]} / {names[cond[1]]} - turn {dev[0]}: {'; '.join(dev[1])}",
                     border_style="red",
                 )
             )
 
-    verdict_lines = "\n".join(f"- {head_to_head(p, results)}" for p in PERSONAS)
-    console.print(Panel(verdict_lines, title="GPT-4o vs Claude under identical pressure", border_style="cyan"))
+    verdict_lines = "\n".join(f"- {head_to_head(p, results, names)}" for p in PERSONAS)
+    console.print(Panel(verdict_lines, title=f"{names['a']} vs {names['b']} under identical pressure", border_style="cyan"))
     console.print(
         "[dim]n=1 conversation per condition at temperature 0.7 - illustrative, not statistical. "
-        "Judge is MODEL_A (GPT-4o) at temperature 0, so GPT-4o is partly grading itself.\n"
+        f"Judge is MODEL_A ({names['a']}) at temperature 0, so {names['a']} is partly grading itself.\n"
         "Repeating each condition 3-5 times would show whether the first-deviation turn is stable "
         "(28 generation + 28 judge calls per full repeat of all 4 conditions).[/dim]\n"
     )
 
 
-def run_validation() -> dict:
+def run_validation(persona_path: Path | None = None) -> dict:
     """Run all 4 conditions (persona x model), judge them, write transcripts; returns the results dict."""
+    persona_path = persona_path or resolve_persona()
+    calibrated_path = calibrated_prompt_path(persona_path, model_pair()[1])
+    if not calibrated_path.exists():
+        raise FileNotFoundError(f"No calibrated persona at {calibrated_path}; run the regenerate stage first.")
+    persona_paths = {"naive": persona_path, "calibrated": calibrated_path}
+    names = model_names()
+
     results = {}
     VALIDATION_DIR.mkdir(parents=True, exist_ok=True)
 
     for persona in PERSONAS:
-        system_prompt = PERSONA_PATHS[persona].read_text()
+        system_prompt = persona_paths[persona].read_text()
         for model_key, env_var in MODELS.items():
             model = os.getenv(env_var)
-            condition = f"{persona}_{model_key}"
+            condition = f"{persona}_{names[model_key]}"
             turns = run_conversation(system_prompt, model, condition)
             with console.status(f"[cyan]{condition}[/cyan] - judging"):
                 judged = [judge_turn(t) for t in turns]
             results[(persona, model_key)] = {"turns": turns, "judged": judged}
             write_transcript(
-                VALIDATION_DIR / f"{condition}_transcript.md",
-                condition, model, PERSONA_PATHS[persona], turns, judged,
+                transcript_path(persona, names[model_key]),
+                condition, model, persona_paths[persona], turns, judged,
             )
             console.print(f"[green]done[/green] {condition}")
     return results
 
 
+def transcripts_glob() -> str:
+    names = model_names()
+    return display_path(VALIDATION_DIR / f"{{naive,calibrated}}_{{{names['a']},{names['b']}}}_transcript.md")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the 7-turn pressure test on the naive and calibrated persona.")
+    add_persona_file_arg(parser)
+    args = parser.parse_args()
     console.rule("[bold cyan]Persona durability under sustained pressure (7 turns)")
-    results = run_validation()
+    results = run_validation(resolve_persona(args.persona_file))
     print_summary(results)
-    console.print("Transcripts saved to [bold]outputs/validation/{naive,calibrated}_{gpt4o,claude}_transcript.md[/bold]")
+    console.print(f"Transcripts saved to [bold]{transcripts_glob()}[/bold]")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,12 @@
 """Diffs two model fingerprints into per-dimension deltas, ranked by normalized magnitude."""
 
+import argparse
 import json
-import sys
 from pathlib import Path
 
+from src.utils.config import add_persona_file_arg, model_pair, pair_tag, persona_suffix, resolve_persona
+
 DIFFS_DIR = Path(__file__).resolve().parents[2] / "outputs" / "diffs"
-FINGERPRINTS_DIR = Path(__file__).resolve().parents[2] / "outputs" / "fingerprints"
 
 # Which normalization scheme applies to each dimension key from fingerprint.py's DIMENSION_KEYS.
 BOUNDED_1_5 = {"tone_warmth", "naturalness"}
@@ -102,6 +103,11 @@ def _describe_numeric_shift(dimension, model_a, model_b, value_a, value_b, kind)
     raise ValueError(f"Unknown numeric kind: {kind}")
 
 
+def diff_path(model_a: str, model_b: str, persona_path: Path | None = None) -> Path:
+    """Where the diff for a model pair lives; persona-conditioned diffs are named after the persona file."""
+    return DIFFS_DIR / f"{pair_tag(model_a, model_b)}_diff{persona_suffix(persona_path)}.json"
+
+
 def compute_diff(fingerprint_a: dict, fingerprint_b: dict, out_path: Path | None = None) -> dict:
     """Compare two model fingerprints dimension-by-dimension and rank the biggest behavioral shifts.
 
@@ -156,7 +162,7 @@ def compute_diff(fingerprint_a: dict, fingerprint_b: dict, out_path: Path | None
     diff = {"dimensions": results, "top_deltas": top_deltas}
 
     DIFFS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = out_path or DIFFS_DIR / "gpt4o_to_claude_diff.json"
+    out_path = out_path or diff_path(model_a, model_b)
     with open(out_path, "w") as f:
         json.dump(diff, f, indent=2)
 
@@ -164,15 +170,25 @@ def compute_diff(fingerprint_a: dict, fingerprint_b: dict, out_path: Path | None
 
 
 if __name__ == "__main__":
-    persona = "--persona" in sys.argv
-    suffix = "_fingerprint_persona.json" if persona else "_fingerprint.json"
-    with open(FINGERPRINTS_DIR / f"openai_gpt-4o{suffix}") as f:
-        fingerprint_a = json.load(f)
-    with open(FINGERPRINTS_DIR / f"anthropic_claude-sonnet-4.6{suffix}") as f:
-        fingerprint_b = json.load(f)
+    from src.fingerprint.fingerprint import fingerprint_path
 
-    diff_out = DIFFS_DIR / ("gpt4o_to_claude_diff_persona.json" if persona else "gpt4o_to_claude_diff.json")
-    diff = compute_diff(fingerprint_a, fingerprint_b, out_path=diff_out)
+    parser = argparse.ArgumentParser(description="Diff the saved MODEL_A and MODEL_B fingerprints.")
+    parser.add_argument("--persona", action="store_true", help="diff the persona-conditioned fingerprints")
+    add_persona_file_arg(parser)
+    args = parser.parse_args()
+    persona_path = resolve_persona(args.persona_file) if args.persona else None
+    model_a, model_b = model_pair()
+
+    fingerprints = []
+    for model in (model_a, model_b):
+        path = fingerprint_path(model, persona_path)
+        if not path.exists():
+            raise SystemExit(f"No fingerprint for {model} at {path}; run `python -m src.fingerprint.fingerprint` with the same flags first.")
+        with open(path) as f:
+            fingerprints.append(json.load(f))
+    fingerprint_a, fingerprint_b = fingerprints
+
+    diff = compute_diff(fingerprint_a, fingerprint_b, out_path=diff_path(model_a, model_b, persona_path))
 
     print(f"Top 3 behavioral deltas: {fingerprint_a['model']} -> {fingerprint_b['model']}\n")
     for i, entry in enumerate(diff["top_deltas"], start=1):

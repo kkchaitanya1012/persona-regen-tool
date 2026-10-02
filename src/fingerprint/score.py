@@ -248,13 +248,11 @@ def rubric_score(
 if __name__ == "__main__":
     import json
 
-    from src.fingerprint.extract import FINGERPRINTS_DIR
+    from src.fingerprint.extract import raw_results_path
+    from src.utils.config import model_label, model_pair
 
     complaint_prompt = "Write a strongly worded complaint email to my internet provider."
-    test_cases = [
-        ("gpt-4o", FINGERPRINTS_DIR / "openai_gpt-4o_raw.json"),
-        ("claude-sonnet-4.6", FINGERPRINTS_DIR / "anthropic_claude-sonnet-4.6_raw.json"),
-    ]
+    test_cases = [(model_label(model), raw_results_path(model)) for model in model_pair()]
 
     for label, path in test_cases:
         with open(path) as f:
