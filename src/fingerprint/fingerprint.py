@@ -1,9 +1,9 @@
 """Builds a scored persona fingerprint for a model from its raw probe responses."""
 
+import argparse
 import json
-import os
-import sys
 from collections import Counter
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -17,6 +17,7 @@ from src.fingerprint.score import (
     rubric_score,
     word_count_score,
 )
+from src.utils.config import add_persona_file_arg, model_pair, persona_suffix, resolve_persona
 
 console = Console()
 
@@ -99,32 +100,31 @@ def _score_dimension(dimension: str, entries: list[dict]):
     raise ValueError(f"No scorer registered for dimension: {dimension}")
 
 
-def _load_raw_results(model_slug: str, persona: bool) -> dict:
-    raw_path = raw_results_path(model_slug, persona)
+def _load_raw_results(model_slug: str, persona_path: Path | None) -> dict:
+    raw_path = raw_results_path(model_slug, persona_path)
     if raw_path.exists():
         console.print(f"[dim]Using cached raw responses: {raw_path}[/dim]")
         with open(raw_path) as f:
             return json.load(f)
 
     console.print(f"[yellow]No cached raw responses for {model_slug}, running probes now...[/yellow]")
-    return run_probes(model_slug, persona=persona)
+    return run_probes(model_slug, persona_path=persona_path)
 
 
-def fingerprint_path(model_slug: str, persona: bool = False):
-    suffix = "_fingerprint_persona.json" if persona else "_fingerprint.json"
-    return FINGERPRINTS_DIR / f"{model_slug.replace('/', '_')}{suffix}"
+def fingerprint_path(model_slug: str, persona_path: Path | None = None) -> Path:
+    return FINGERPRINTS_DIR / f"{model_slug.replace('/', '_')}_fingerprint{persona_suffix(persona_path)}.json"
 
 
-def build_fingerprint(model_slug: str, persona: bool = False) -> dict:
+def build_fingerprint(model_slug: str, persona_path: Path | None = None) -> dict:
     """Score `model_slug`'s raw probe responses into a clean fingerprint and save it to disk.
 
-    persona=True scores the persona-conditioned raw responses and saves a separate
-    *_fingerprint_persona.json so the bare-model fingerprint is never overwritten.
+    With a persona_path, scores that persona's conditioned raw responses and saves a separate
+    *_fingerprint_persona_<name>.json so the bare-model fingerprint is never overwritten.
     """
-    raw_results = _load_raw_results(model_slug, persona)
+    raw_results = _load_raw_results(model_slug, persona_path)
     dimensions = {}
 
-    console.rule(f"[bold cyan]Scoring {model_slug}{' (persona)' if persona else ''}")
+    console.rule(f"[bold cyan]Scoring {model_slug}{f' (persona {persona_path.name})' if persona_path else ''}")
     for probe in load_probes():
         dimension = probe["dimension"]
         console.print(f"  scoring [yellow]{dimension}[/yellow]...")
@@ -133,7 +133,7 @@ def build_fingerprint(model_slug: str, persona: bool = False) -> dict:
     fingerprint = {"model": model_slug, "dimensions": dimensions}
 
     FINGERPRINTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = fingerprint_path(model_slug, persona)
+    out_path = fingerprint_path(model_slug, persona_path)
     with open(out_path, "w") as f:
         json.dump(fingerprint, f, indent=2)
 
@@ -142,12 +142,15 @@ def build_fingerprint(model_slug: str, persona: bool = False) -> dict:
 
 
 if __name__ == "__main__":
-    model_a = os.getenv("MODEL_A")
-    model_b = os.getenv("MODEL_B")
-    persona = "--persona" in sys.argv
+    parser = argparse.ArgumentParser(description="Build fingerprints for MODEL_A and MODEL_B.")
+    parser.add_argument("--persona", action="store_true", help="probe with the persona as the system prompt")
+    add_persona_file_arg(parser)
+    args = parser.parse_args()
+    persona_path = resolve_persona(args.persona_file) if args.persona else None
+    model_a, model_b = model_pair()
 
-    fingerprint_a = build_fingerprint(model_a, persona=persona)
-    fingerprint_b = build_fingerprint(model_b, persona=persona)
+    fingerprint_a = build_fingerprint(model_a, persona_path=persona_path)
+    fingerprint_b = build_fingerprint(model_b, persona_path=persona_path)
 
     table = Table(title="Persona Fingerprint Comparison")
     table.add_column("Dimension", style="bold")
