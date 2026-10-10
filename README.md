@@ -1,5 +1,11 @@
 # persona-regen-tool
 
+## Introduction
+
+[![persona-regen-tool intro: same persona prompt, two models, different answers to "am I talking to a bot?"](docs/intro.gif)](docs/intro.mp4)
+
+_20-second intro, built from this repo's own outputs. Click for the full video with sound._
+
 When you move a production agent from one LLM to another, the same system prompt often behaves differently: replies get longer or shorter, the model handles "let me talk to a manager" differently, it self-discloses as an AI at different moments. `persona-regen-tool` measures that gap instead of guessing at it. It probes two models across seven behavioral dimensions (verbosity, refusal threshold, ambiguity handling, instruction literalness, tone/warmth, escalation/handoff behavior, naturalness), turns the results into a normalized behavioral diff, has the target model rewrite only the parts of your persona prompt that the largest deltas touch, and then validates the result with a scripted 7-turn pressure conversation run on both models with the original and the calibrated persona.
 
 ## Setup
