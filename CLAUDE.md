@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Python 3.10+. No test suite and no linter configured.
 
 ```bash
+pip install -r requirements.txt
 cp .env.example .env          # set OPENROUTER_API_KEY, MODEL_A, MODEL_B
 python run_pipeline.py                         # full run; reuses cached probe responses
 python run_pipeline.py --fresh                 # re-run probes
