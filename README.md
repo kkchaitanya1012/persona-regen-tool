@@ -85,3 +85,7 @@ identa-agent gives you a portable persona format, with the per-model calibration
 | `src/regenerate/` | Persona rewrite driven by the decisive deltas |
 | `src/demo/` | The 7-turn pressure-test validation |
 | `outputs/` | Generated fingerprints, diffs, calibrated prompts, transcripts (gitignored) |
+
+## License
+
+Apache License 2.0. See `LICENSE` and `NOTICE`.
